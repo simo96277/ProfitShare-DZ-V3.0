@@ -1,0 +1,94 @@
+name: Build ProfitShare DZ V3
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Find project archive
+        run: |
+          set -e
+
+          FILE=$(find . -maxdepth 2 -type f \( -name "*.zip" -o -name "*.tar" \) | head -n 1)
+
+          if [ -z "$FILE" ]; then
+            echo "ERROR: Project ZIP/TAR not found in repository."
+            echo "Upload the ProfitShare DZ project archive to the repository root."
+            exit 1
+          fi
+
+          echo "Found project archive:"
+          echo "$FILE"
+
+          mkdir -p extracted
+
+          case "$FILE" in
+            *.zip)
+              unzip -q "$FILE" -d extracted
+              ;;
+            *.tar)
+              tar -xf "$FILE" -C extracted
+              ;;
+          esac
+
+      - name: Locate Flutter project
+        run: |
+          set -e
+
+          PUBSPEC=$(find extracted -type f -name "pubspec.yaml" | head -n 1)
+
+          if [ -z "$PUBSPEC" ]; then
+            echo "ERROR: pubspec.yaml not found."
+            find extracted -maxdepth 4 -type f | head -100
+            exit 1
+          fi
+
+          PROJECT_DIR=$(dirname "$PUBSPEC")
+
+          echo "Flutter project:"
+          echo "$PROJECT_DIR"
+
+          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: "3.29.3"
+          channel: stable
+          cache: true
+
+      - name: Create Android project
+        run: |
+          set -e
+
+          rm -rf build_mobile
+
+          flutter create \
+            --project-name profitshare_dz \
+            build_mobile
+
+          cp "$PROJECT_DIR/pubspec.yaml" build_mobile/pubspec.yaml
+          cp "$PROJECT_DIR/lib/main.dart" build_mobile/lib/main.dart
+
+      - name: Install Flutter dependencies
+        working-directory: build_mobile
+        run: flutter pub get
+
+      - name: Build release APK
+        working-directory: build_mobile
+        run: flutter build apk --release
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: ProfitShare-DZ-V3-APK
+          path: build_mobile/build/app/outputs/flutter-apk/app-release.apk
